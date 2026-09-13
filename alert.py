@@ -25,18 +25,28 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 def send_email(recipient: str, subject: str, body: str) -> None:
-    if not SENDER or not PASSWORD:
-        raise RuntimeError("Set EMAIL_SENDER and EMAIL_PASSWORD in environment variables.")
+    sender = os.getenv("EMAIL_SENDER")
+    password = os.getenv("EMAIL_PASSWORD", "").replace(" ", "")
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+
+    if not sender:
+        raise RuntimeError("EMAIL_SENDER is missing")
+
+    if not password:
+        raise RuntimeError("EMAIL_PASSWORD is missing")
 
     message = EmailMessage()
-    message["From"] = SENDER
+    message["From"] = sender
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
+        smtp.ehlo()
         smtp.starttls()
-        smtp.login(SENDER, PASSWORD)
+        smtp.ehlo()
+        smtp.login(sender, password)
         smtp.send_message(message)
 
 
