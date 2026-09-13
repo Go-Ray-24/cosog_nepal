@@ -41,3 +41,5 @@ DEFAULT_REGION = os.getenv("DEFAULT_REGION", "nepal")
 
 # Default bounding box used when no region/bbox is supplied by the request.
 NEPAL_BBOX = REGIONS.get(DEFAULT_REGION, REGIONS["nepal"])["bbox"]
+
+mail_sender=os.getenv("EMAIL_SENDER", "mlsn.314596841f69228e5b8f265d61fb0d95915a1191c5c4a52947c926d5555811db")
