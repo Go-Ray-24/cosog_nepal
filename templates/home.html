@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}FireWatch Nepal &mdash; Satellite Forest Fire Early Warning{% endblock %}
+
+{% block content %}
+<header class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="hero-inner">
+        <p class="hero-eyebrow">🛰️ Powered by NASA FIRMS &middot; VIIRS 375m &amp; MODIS</p>
+        <h1 class="hero-title">See wildfires the moment<br>satellites do.</h1>
+        <p class="hero-lead">
+            FireWatch Nepal ingests near&ndash;real&ndash;time thermal detections across the country,
+            plots every active hotspot on a live map, and automatically alerts the nearest
+            response authority when fire breaches a protected zone.
+        </p>
+        <div class="hero-actions">
+            <a class="btn btn-primary" href="{{ url_for('monitoring') }}">Open Live Map →</a>
+            <a class="btn btn-ghost" href="{{ url_for('analytics') }}">View Analytics</a>
+        </div>
+        <div class="hero-stats" id="heroStats">
+            <div class="hero-stat"><span class="num" data-k="total">—</span><span class="lbl">detections · last 5 days</span></div>
+            <div class="hero-stat"><span class="num" data-k="high">—</span><span class="lbl">high-confidence</span></div>
+            <div class="hero-stat"><span class="num" data-k="max">—</span><span class="lbl">peak FRP (MW)</span></div>
+        </div>
+    </div>
+</header>
+
+<section class="section">
+    <h2 class="section-title">How it works</h2>
+    <div class="feature-grid">
+        <article class="feature">
+            <div class="feature-icon">🛰️</div>
+            <h3>1 · Satellite ingestion</h3>
+            <p>Every request pulls fresh CSV hotspot data from the NASA FIRMS Area API for Nepal's bounding box, normalising confidence and Fire Radiative Power.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">🗺️</div>
+            <h3>2 · Live map &amp; geo-fencing</h3>
+            <p>Draw a polygon or circle around a community forest or park. FireWatch flags any detection that falls inside your zone in real time.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">📈</div>
+            <h3>3 · Analytics</h3>
+            <p>Track detection trends, day vs. night activity, FRP intensity and which registered communities are most exposed over the past week.</p>
+        </article>
+        <article class="feature">
+            <div class="feature-icon">📧</div>
+            <h3>4 · Nearest-authority alerts</h3>
+            <p>One click computes the haversine distance from every breach to each registered station and emails the closest one with a deployable summary.</p>
+        </article>
+    </div>
+</section>
+
+<section class="section section-alt">
+    <div class="split">
+        <div>
+            <h2 class="section-title">Built for Nepal's fire season</h2>
+            <p>The Chure and Terai forests accumulate dry leaf-litter and grass fuel through the pre-monsoon window (Feb&ndash;May) &mdash; when the vast majority of FIRMS detections cluster. FireWatch is designed to shorten the gap between a satellite overpass and boots on the ground.</p>
+            <ul class="check-list">
+                <li>VIIRS 375&nbsp;m resolution catches smaller, cooler fires than MODIS</li>
+                <li>Confidence &amp; FRP filtering suppresses agricultural-burn false positives</li>
+                <li>Registered buffer-zone committees and park stations as alert recipients</li>
+            </ul>
+        </div>
+        <div class="cta-card">
+            <h3>Ready to watch a zone?</h3>
+            <p>Jump into the live map, draw your area of interest, and arm nearest-authority alerting.</p>
+            <a class="btn btn-primary" href="{{ url_for('monitoring') }}">Start Monitoring</a>
+        </div>
+    </div>
+</section>
+
+<section class="section" id="learn">
+    <h2 class="section-title">Understanding the data</h2>
+    <p class="muted" style="max-width:640px;">Every point on the map comes from a weather satellite that measures heat, not smoke or flames. Here's what the numbers mean in plain terms.</p>
+
+    <div class="glossary">
+        <details open>
+            <summary>🛰️ What is NASA FIRMS?</summary>
+            <p><strong>FIRMS</strong> (Fire Information for Resource Management System) is a free NASA service that publishes the locations of active fires detected by satellites, usually within <strong>1&ndash;3 hours</strong> of the satellite passing overhead. It does not predict fires &mdash; it reports heat that is already burning.</p>
+        </details>
+
+        <details>
+            <summary>📡 VIIRS vs. MODIS &mdash; which sensor?</summary>
+            <p>Both are instruments on NASA satellites that scan the whole Earth roughly twice a day.</p>
+            <ul>
+                <li><strong>VIIRS (375 m):</strong> newer, sharper. Each detection covers an area about 375 m across, so it catches smaller and cooler fires. Preferred for early warning.</li>
+                <li><strong>MODIS (1 km):</strong> older, coarser. Good for large fires and long historical records, but misses small ones.</li>
+            </ul>
+            <p>The number in brackets is the <em>pixel size</em> &mdash; the smallest patch of ground the sensor can resolve.</p>
+        </details>
+
+        <details>
+            <summary>🔥 FRP &mdash; Fire Radiative Power</summary>
+            <p><strong>FRP</strong> is how much heat energy the fire is giving off at the moment of the satellite pass, measured in <strong>megawatts (MW)</strong>. Think of it as the fire's "brightness".</p>
+            <ul>
+                <li><strong>Low (&lt; 10 MW):</strong> small grass or leaf-litter fire, or a controlled agricultural burn.</li>
+                <li><strong>Moderate (10&ndash;50 MW):</strong> an established fire spreading through undergrowth.</li>
+                <li><strong>High (&gt; 50 MW):</strong> intense crown fire or a large burn front.</li>
+            </ul>
+            <p>On the map, higher FRP makes a point <em>bigger</em> and pushes the heatmap toward red.</p>
+        </details>
+
+        <details>
+            <summary>🎯 Confidence &mdash; how sure is the satellite?</summary>
+            <p>An estimate of how likely the detection is a real fire rather than sun-glint, hot bare soil, or an industrial heat source.</p>
+            <ul>
+                <li><span class="swatch high"></span><strong>High</strong> &mdash; almost certainly a real fire.</li>
+                <li><span class="swatch nominal"></span><strong>Nominal</strong> &mdash; probably real; treat as worth checking.</li>
+                <li><span class="swatch low"></span><strong>Low</strong> &mdash; weak signal; could be a false alarm.</li>
+            </ul>
+        </details>
+
+        <details>
+            <summary>🕒 Acquisition time &amp; Day / Night</summary>
+            <p><strong>Acq time</strong> is the moment (in UTC) the satellite recorded the heat &mdash; not when the fire started. <strong>Day / Night</strong> tells you whether the pass was in daylight; night passes detect fires more reliably because there's no solar interference.</p>
+        </details>
+
+        <details>
+            <summary>📍 Geo-fence &amp; nearest-authority alert</summary>
+            <p>A <strong>geo-fence</strong> is a boundary you draw on the live map around a place you care about &mdash; a community forest, a village, a park. If any detection falls inside it, the dashboard flags a breach and can email the <strong>closest registered contact</strong>, calculated as the straight-line (haversine) distance from the fire to every registered location.</p>
+        </details>
+    </div>
+
+    <p class="disclaimer">⚠️ Satellite detections are an aid, not a guarantee. A clear sky is required for a detection, passes happen only a few times a day, and small or early fires can be missed. Always confirm with people on the ground.</p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+fetch('/api/stats?days=5')
+    .then(r => r.json())
+    .then(d => {
+        const map = { total: d.total, high: d.by_confidence.high, max: d.frp.max };
+        document.querySelectorAll('#heroStats .num').forEach(el => {
+            const v = map[el.dataset.k];
+            el.textContent = (v ?? 0).toLocaleString();
+        });
+    })
+    .catch(() => {});
+</script>
+{% endblock %}

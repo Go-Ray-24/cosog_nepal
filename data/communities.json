@@ -1,0 +1,62 @@
+[
+  {
+    "id": "np-001",
+    "name": "Chitwan Buffer Zone - Sauraha",
+    "district": "Chitwan",
+    "latitude": 27.5817,
+    "longitude": 84.5023,
+    "population": 4200,
+    "phone": "+9779800000001",
+    "email": "purik6828@gmail.com"
+  },
+  {
+    "id": "np-002",
+    "name": "Bardiya National Park - Thakurdwara",
+    "district": "Bardiya",
+    "latitude": 28.3667,
+    "longitude": 81.3667,
+    "population": 3100,
+    "phone": "+9779800000002",
+    "email": "prabeshrawal20@gmail.com"
+  },
+  {
+    "id": "np-003",
+    "name": "Shivapuri Nagarjun - Okharpauwa",
+    "district": "Nuwakot",
+    "latitude": 27.8167,
+    "longitude": 85.3333,
+    "population": 1800,
+    "phone": "+9779800000003",
+    "email": "karkidrona5@gmail.com"
+  },
+  {
+    "id": "np-004",
+    "name": "Pokhara - Ghandruk Rural Municipality",
+    "district": "Kaski",
+    "latitude": 28.3711,
+    "longitude": 83.8122,
+    "population": 2600,
+    "phone": "+9779800000004",
+    "email": "ghandruk.ward@example.gov.np"
+  },
+  {
+    "id": "np-005",
+    "name": "Ilam - Mai Municipality",
+    "district": "Ilam",
+    "latitude": 26.9088,
+    "longitude": 87.928,
+    "population": 3500,
+    "phone": "+9779800000005",
+    "email": "roshanacharya9808@gmail.com"
+  },
+  {
+    "id": "np-006",
+    "name": "janak",
+    "district": "rupandehi",
+    "latitude": 28.581,
+    "longitude": 84.5023,
+    "population": 200,
+    "phone": "435345343",
+    "email": "pufffrik6828@gmail.com"
+  }
+]

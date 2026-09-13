@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Alerts &mdash; FireWatch Nepal{% endblock %}
+
+{% block content %}
+<section class="section page-head">
+    <div>
+        <h1 class="section-title">Emergency Response</h1>
+        <p class="muted">Registered authorities and nearest-station dispatch.</p>
+    </div>
+</section>
+
+<section class="section">
+    <h2 class="sub-title">Nationwide breach scan</h2>
+    <p class="muted">Checks the last 24&nbsp;hours of detections against every registered station's 10&nbsp;km radius, then lets you email the nearest one.</p>
+    <div class="scan-bar">
+        <button class="btn btn-primary" id="scanBtn">Run breach scan</button>
+        <span id="scanStatus" class="muted"></span>
+    </div>
+    <div id="scanResult" class="alert-panel" hidden></div>
+</section>
+
+<section class="section">
+    <h2 class="sub-title">Register for alerts</h2>
+    <p class="muted">Add your location and email to receive an alert if a fire is detected near you.</p>
+    <form id="regForm" class="reg-form">
+        <div class="field"><label>Name / place *</label><input name="name" required placeholder="e.g. Ram's Farm, Ward 4"></div>
+        <div class="field"><label>District *</label><input name="district" required placeholder="e.g. Chitwan"></div>
+        <div class="field"><label>Latitude *</label><input name="latitude" required type="number" step="any" placeholder="27.5817"></div>
+        <div class="field"><label>Longitude *</label><input name="longitude" required type="number" step="any" placeholder="84.5023"></div>
+        <div class="field"><label>Population</label><input name="population" type="number" min="0" placeholder="0"></div>
+        <div class="field"><label>Phone</label><input name="phone" placeholder="+9779800000000"></div>
+        <div class="field field-wide"><label>Email *</label><input name="email" required type="email" placeholder="you@example.com"></div>
+        <div class="field-wide">
+            <button type="submit" class="btn btn-primary">Register</button>
+            <span id="regStatus" class="muted"></span>
+        </div>
+    </form>
+</section>
+
+<section class="section">
+    <h2 class="sub-title">Registered recipients</h2>
+    <div class="authority-grid" id="authGrid"><p class="muted">Loading…</p></div>
+</section>
+
+<section class="section">
+    <h2 class="sub-title">Dispatch history <span class="muted">(this session)</span></h2>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Time (UTC)</th><th>Recipient</th><th>District</th><th>Distance</th><th>Fires</th></tr></thead>
+            <tbody id="histBody"><tr><td colspan="5" class="muted">No alerts dispatched yet.</td></tr></tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let communities = [];
+
+function loadCommunities() {
+    fetch('/api/communities').then(r => r.json()).then(data => {
+        communities = data;
+        document.getElementById('authGrid').innerHTML = data.map(c => `
+            <article class="authority-card">
+                <h3>${c.name}</h3>
+                <p class="muted">${c.district} District</p>
+                <dl>
+                    <div><dt>Email</dt><dd>${c.email || '—'}</dd></div>
+                    <div><dt>Phone</dt><dd>${c.phone || '—'}</dd></div>
+                    <div><dt>Population</dt><dd>${(c.population || 0).toLocaleString()}</dd></div>
+                    <div><dt>Coordinates</dt><dd>${c.latitude}, ${c.longitude}</dd></div>
+                </dl>
+            </article>`).join('');
+    });
+}
+
+function loadHistory() {
+    fetch('/api/alert-history').then(r => r.json()).then(rows => {
+        const body = document.getElementById('histBody');
+        if (!rows.length) return;
+        body.innerHTML = rows.map(h => `
+            <tr>
+                <td>${new Date(h.timestamp).toLocaleString()}</td>
+                <td>${h.recipient.name || '—'}</td>
+                <td>${h.recipient.district || '—'}</td>
+                <td>${h.recipient.distance_km != null ? h.recipient.distance_km + ' km' : '—'}</td>
+                <td>${h.fire_count}</td>
+            </tr>`).join('');
+    });
+}
+
+document.getElementById('scanBtn').addEventListener('click', () => {
+    const btn = document.getElementById('scanBtn');
+    const status = document.getElementById('scanStatus');
+    const result = document.getElementById('scanResult');
+    btn.disabled = true;
+    status.textContent = 'Fetching detections…';
+    result.hidden = true;
+
+    fetch('/api/hotspots?source=VIIRS_NOAA21_NRT&days=1')
+        .then(r => r.json())
+        .then(fires => {
+            status.textContent = `${fires.length} detections found. Dispatching nearest-authority alert…`;
+            return fetch('/api/send-alert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fires, communities })
+            });
+        })
+        .then(r => r.json())
+        .then(d => {
+            result.hidden = false;
+            if (d.status === 'success' && d.recipient) {
+                const r = d.recipient;
+                result.className = 'alert-panel ok';
+                result.innerHTML = `<strong>✅ Alert emailed to nearest authority</strong>
+                    <p>${r.name} (${r.district}) — ${r.distance_km} km from the closest fire · ${r.email}</p>`;
+                loadHistory();
+            } else {
+                result.className = 'alert-panel warn';
+                result.innerHTML = `<strong>⚠️ ${d.message || 'No alert sent'}</strong>`;
+            }
+            status.textContent = '';
+        })
+        .catch(err => { status.textContent = 'Error: ' + err; })
+        .finally(() => { btn.disabled = false; });
+});
+
+document.getElementById('regForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const status = document.getElementById('regStatus');
+    const payload = Object.fromEntries(new FormData(form).entries());
+    status.textContent = 'Submitting…';
+
+    fetch('/api/communities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(async r => ({ ok: r.ok, body: await r.json() }))
+    .then(({ ok, body }) => {
+        if (ok) {
+            status.innerHTML = `<span style="color:#1f7a3d;">✅ Registered as ${body.entry.id}. You'll be alerted for nearby fires.</span>`;
+            form.reset();
+            loadCommunities();
+        } else {
+            status.innerHTML = `<span style="color:#a71d2a;">⚠️ ${body.message}</span>`;
+        }
+    })
+    .catch(err => { status.innerHTML = `<span style="color:#a71d2a;">Error: ${err}</span>`; });
+});
+
+loadCommunities();
+loadHistory();
+</script>
+{% endblock %}

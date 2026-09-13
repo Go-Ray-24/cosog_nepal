@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block title %}Live Monitoring &mdash; FireWatch Nepal{% endblock %}
+{% block bodyclass %}page-map{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+{% endblock %}
+
+{% block content %}
+<div id="map-container">
+    <div class="floating-panel">
+        <div class="panel-title">Layer Controls</div>
+
+        <div class="control-group">
+            <label for="region">Region</label>
+            <select id="region">
+                {% for rid, r in regions.items() %}
+                <option value="{{ rid }}" data-bbox="{{ r.bbox }}" {{ 'selected' if rid == default_region }}>{{ r.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="satellite">Detection Layer</label>
+            <select id="satellite">
+                <option value="VIIRS_NOAA21_NRT" selected>VIIRS NOAA-21 (375m)</option>
+                <option value="VIIRS_SNPP_NRT">VIIRS S-NPP (375m)</option>
+                <option value="MODIS_NRT">MODIS (1km)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="timeRange">Time Window</label>
+            <select id="timeRange">
+                <option value="1">Last 24 Hours</option>
+                <option value="2" selected>Last 48 Hours</option>
+                <option value="3">Last 3 Days</option>
+                <option value="5">Last 5 Days</option>
+            </select>
+            <p class="hint" id="dataStatus">Loading detections…</p>
+        </div>
+
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="toggleHeatmap" checked>
+                Enable Heatmap
+            </label>
+        </div>
+
+        <div id="geoFenceAlert" class="alert-banner">
+            ⚠️ <strong>GEO-FENCE WARNING!</strong><br>
+            <span id="alertMessage">0 fires inside active zone.</span>
+            <button id="sendAlertBtn" class="dispatch-btn">📧 Send Alert to Nearest Authority</button>
+            <div id="dispatchStatus" class="dispatch-status"></div>
+        </div>
+
+        <div id="fireAlert" class="alert-banner" style="background:#fff3cd;border-color:#ffe69c;color:#664d03;">
+            🔥 <strong><span id="fireCount">0</span> active fire detection(s)</strong> in view.
+            <button id="dispatchNowBtn" class="dispatch-btn">📧 Send Alert to Nearest Authority</button>
+            <div id="dispatchNowStatus" class="dispatch-status"></div>
+        </div>
+
+
+
+        <div class="legend-section">
+            <div class="panel-title">Heatmap Density</div>
+            <div class="gradient-bar"></div>
+            <div class="legend-labels">
+                <span>Low</span><span>Moderate</span><span>High Intensity</span>
+            </div>
+        </div>
+
+        <div class="legend-section">
+            <div class="panel-title">Point Confidence</div>
+            <ul class="confidence-list">
+                <li class="confidence-item"><span class="color-dot high"></span> High Confidence</li>
+                <li class="confidence-item"><span class="color-dot nominal"></span> Nominal Confidence</li>
+                <li class="confidence-item"><span class="color-dot low"></span> Low Confidence</li>
+            </ul>
+        </div>
+
+        <details class="legend-section panel-help">
+            <summary>What am I looking at?</summary>
+            <p>Each dot is a heat detection from a NASA satellite (VIIRS / MODIS), not a photo of flames &mdash; usually 1&ndash;3 hours old.</p>
+            <p><strong>FRP</strong> (Fire Radiative Power, in MW) is the fire's heat output: bigger dot = hotter fire. <strong>Confidence</strong> is how sure the satellite is it's a real fire.</p>
+            <p><a href="{{ url_for('home') }}#learn">Full data guide →</a></p>
+        </details>
+    </div>
+
+    <div id="map"></div>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script>
+    const defaultBBox = "{{ bbox }}";
+    const bboxCoords = defaultBBox.split(',').map(Number);
+    const map = L.map('map').fitBounds([[bboxCoords[1], bboxCoords[0]], [bboxCoords[3], bboxCoords[2]]]);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markerGroup = L.layerGroup().addTo(map);
+    const geoFenceMatchesGroup = L.layerGroup().addTo(map);
+    let heatLayer = null;
+    let currentHotspots = [];
+    let communitiesData = [];
+    let activeBreachingFires = [];
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    const drawControl = new L.Control.Draw({
+        draw: {
+            polygon: { shapeOptions: { color: '#dc3545', fillColor: '#dc3545', fillOpacity: 0.15, weight: 2 } },
+            circle: { shapeOptions: { color: '#dc3545', fillColor: '#dc3545', fillOpacity: 0.15, weight: 2 } },
+            rectangle: { shapeOptions: { color: '#dc3545', fillColor: '#dc3545', fillOpacity: 0.15, weight: 2 } },
+            polyline: false, marker: false, circlemarker: false
+        },
+        edit: { featureGroup: drawnItems }
+    });
+    map.addControl(drawControl);
+
+    function getLayerBBox(layer) {
+        if (!layer) return null;
+        const b = layer.getBounds();
+        const sw = b.getSouthWest(), ne = b.getNorthEast();
+        return `${sw.lng.toFixed(4)},${sw.lat.toFixed(4)},${ne.lng.toFixed(4)},${ne.lat.toFixed(4)}`;
+    }
+
+    function isPointInPolygon(point, vs) {
+        let x = point.lat, y = point.lng, inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+            let xi = vs[i].lat, yi = vs[i].lng, xj = vs[j].lat, yj = vs[j].lng;
+            let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    function checkGeofences() {
+        geoFenceMatchesGroup.clearLayers();
+        activeBreachingFires = [];
+
+        drawnItems.eachLayer(zone => {
+            currentHotspots.forEach(h => {
+                const firePt = L.latLng(h.latitude, h.longitude);
+                let isInside = false;
+                if (zone instanceof L.Circle) {
+                    if (zone.getLatLng().distanceTo(firePt) <= zone.getRadius()) isInside = true;
+                } else if (zone instanceof L.Polygon) {
+                    if (isPointInPolygon(firePt, zone.getLatLngs()[0])) isInside = true;
+                }
+                if (isInside) {
+                    activeBreachingFires.push(h);
+                    L.circleMarker(firePt, { radius: 9, color: '#721c24', fillColor: '#ff0000', fillOpacity: 1, weight: 2 })
+                    .bindPopup(`<div style="color:#721c24;"><strong>🚨 GEOFENCE BREACH</strong><br><strong>FRP:</strong> ${h.frp} MW<br><strong>Confidence:</strong> ${h.confidence.toUpperCase()}<br><strong>Time:</strong> ${h.acq_time}</div>`)
+                    .addTo(geoFenceMatchesGroup);
+                }
+            });
+        });
+
+        const alertBanner = document.getElementById('geoFenceAlert');
+        const alertMsg = document.getElementById('alertMessage');
+        const statusBox = document.getElementById('dispatchStatus');
+
+        if (activeBreachingFires.length > 0) {
+            alertBanner.classList.add('active');
+            alertMsg.innerHTML = `<span class="alert-count">${activeBreachingFires.length}</span> active fire(s) detected inside your zone!`;
+        } else {
+            alertBanner.classList.remove('active');
+            statusBox.style.display = 'none';
+        }
+    }
+
+    map.on(L.Draw.Event.CREATED, function (e) {
+        drawnItems.clearLayers();
+        drawnItems.addLayer(e.layer);
+        loadHotspots(getLayerBBox(e.layer));
+    });
+    map.on(L.Draw.Event.EDITED, function () {
+        const layers = drawnItems.getLayers();
+        if (layers.length > 0) loadHotspots(getLayerBBox(layers[0]));
+    });
+    map.on(L.Draw.Event.DELETED, function () { loadHotspots(); });
+
+    fetch('/api/communities')
+        .then(res => res.json())
+        .then(data => {
+            communitiesData = data;
+            data.forEach(c => {
+                if (c.latitude && c.longitude) {
+                    L.marker([c.latitude, c.longitude])
+                     .bindPopup(`<strong>${c.name}</strong><br>District: ${c.district}<br>Email: ${c.email}`)
+                     .addTo(map);
+                }
+            });
+        });
+
+    function getConfidenceColor(conf) {
+        switch (conf) {
+            case 'high': return '#d9534f';
+            case 'nominal': return '#f0ad4e';
+            case 'low': return '#5bc0de';
+            default: return '#f0ad4e';
+        }
+    }
+
+    function loadHotspots(targetBBox = null) {
+        const source = document.getElementById('satellite').value;
+        const days = document.getElementById('timeRange').value;
+        let queryUrl = `/api/hotspots?source=${source}&days=${days}`;
+        if (targetBBox) queryUrl += `&bbox=${targetBBox}`;
+        else queryUrl += `&region=${document.getElementById('region').value}`;
+
+        const statusEl = document.getElementById('dataStatus');
+        statusEl.textContent = 'Loading detections…';
+
+        fetch(queryUrl)
+            .then(res => res.json())
+            .then(hotspots => {
+                currentHotspots = hotspots;
+                if (hotspots.length === 0) {
+                    statusEl.innerHTML = '<span style="color:#a71d2a;">No detections found for this region and time window. Try a wider window or switch region.</span>';
+                } else {
+                    statusEl.textContent = `${hotspots.length} detection(s) loaded${targetBBox ? ' in drawn zone' : ''}.`;
+                }
+                markerGroup.clearLayers();
+                if (heatLayer) map.removeLayer(heatLayer);
+                const heatPoints = [];
+
+                hotspots.forEach(h => {
+                    const latLng = [h.latitude, h.longitude];
+                    const radius = Math.max(4, Math.min(Math.sqrt(h.frp) * 2.5, 20));
+                    const color = getConfidenceColor(h.confidence);
+                    L.circleMarker(latLng, { radius, color, fillColor: color, fillOpacity: 0.75, weight: 1 })
+                    .bindPopup(`<strong>Fire Hotspot</strong><br>FRP: ${h.frp} MW<br>Confidence: ${h.confidence.toUpperCase()}<br>Acq Time: ${h.acq_time}`)
+                    .addTo(markerGroup);
+                    heatPoints.push([h.latitude, h.longitude, Math.min(h.frp / 50, 1.0)]);
+                });
+
+                heatLayer = L.heatLayer(heatPoints, {
+                    radius: 25, blur: 15, maxZoom: 12,
+                    gradient: { 0.2: 'blue', 0.4: 'cyan', 0.6: 'lime', 0.8: 'yellow', 1.0: 'red' }
+                });
+                if (document.getElementById('toggleHeatmap').checked) heatLayer.addTo(map);
+                checkGeofences();
+
+                const fireAlert = document.getElementById('fireAlert');
+                if (hotspots.length > 0) {
+                    document.getElementById('fireCount').textContent = hotspots.length;
+                    fireAlert.classList.add('active');
+                } else {
+                    fireAlert.classList.remove('active');
+                    document.getElementById('dispatchNowStatus').style.display = 'none';
+                }
+            })
+            .catch(err => { statusEl.innerHTML = `<span style="color:#a71d2a;">Failed to load FIRMS data: ${err}</span>`; });
+    }
+
+    document.getElementById('sendAlertBtn').addEventListener('click', () => {
+        if (activeBreachingFires.length === 0) {
+            alert("No active fires detected in the Geo-Fence zone to report.");
+            return;
+        }
+        const btn = document.getElementById('sendAlertBtn');
+        const statusBox = document.getElementById('dispatchStatus');
+        btn.disabled = true;
+        btn.innerText = "Finding Nearest Authority...";
+        statusBox.style.display = "block";
+        statusBox.innerHTML = "⏳ Calculating distance & sending email...";
+
+        fetch('/api/send-alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fires: activeBreachingFires, communities: communitiesData })
+        })
+        .then(res => res.json())
+        .then(resData => {
+            if (resData.status === "success" && resData.recipient) {
+                const r = resData.recipient;
+                statusBox.innerHTML = `<strong>Alert Sent to Nearest Authority:</strong><br><strong>${r.name}</strong> (${r.district})<br>📏 Distance: <strong>${r.distance_km} km away</strong><br>📧 ${r.email}`;
+            } else {
+                statusBox.innerHTML = `<span style="color:#ffc107;">❌ Failed: ${resData.message}</span>`;
+            }
+        })
+        .catch(err => { statusBox.innerHTML = `<span style="color:#ffc107;">❌ Dispatch Error: ${err}</span>`; })
+        .finally(() => { btn.disabled = false; btn.innerText = "Resend Alert to Nearest Authority"; });
+    });
+
+    document.getElementById('dispatchNowBtn').addEventListener('click', () => {
+        const fires = activeBreachingFires.length > 0 ? activeBreachingFires : currentHotspots;
+        const btn = document.getElementById('dispatchNowBtn');
+        const statusBox = document.getElementById('dispatchNowStatus');
+        if (fires.length === 0) return;
+
+        btn.disabled = true;
+        btn.innerText = 'Finding Nearest Authority...';
+        statusBox.style.display = 'block';
+        statusBox.innerHTML = `⏳ Dispatching alert for ${fires.length} detection(s)...`;
+
+        fetch('/api/send-alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fires, communities: communitiesData })
+        })
+        .then(res => res.json())
+        .then(resData => {
+            if (resData.status === 'success' && resData.recipient) {
+                const r = resData.recipient;
+                statusBox.innerHTML = `<strong>✅ Alert Sent:</strong><br><strong>${r.name}</strong> (${r.district})<br>📏 ${r.distance_km} km from closest fire<br>📧 ${r.email}`;
+            } else {
+                statusBox.innerHTML = `<span style="color:#a71d2a;">❌ ${resData.message || 'Failed to send'}</span>`;
+            }
+        })
+        .catch(err => { statusBox.innerHTML = `<span style="color:#a71d2a;">❌ Dispatch Error: ${err}</span>`; })
+        .finally(() => { btn.disabled = false; btn.innerText = '📧 Send Alert to Nearest Authority'; });
+    });
+
+    document.getElementById('region').addEventListener('change', (e) => {
+        const bbox = e.target.selectedOptions[0].dataset.bbox.split(',').map(Number);
+        drawnItems.clearLayers();
+        geoFenceMatchesGroup.clearLayers();
+        map.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]]);
+        loadHotspots();
+    });
+
+    document.getElementById('satellite').addEventListener('change', () => {
+        const layers = drawnItems.getLayers();
+        loadHotspots(layers.length > 0 ? getLayerBBox(layers[0]) : null);
+    });
+    document.getElementById('timeRange').addEventListener('change', () => {
+        const layers = drawnItems.getLayers();
+        loadHotspots(layers.length > 0 ? getLayerBBox(layers[0]) : null);
+    });
+    document.getElementById('toggleHeatmap').addEventListener('change', (e) => {
+        if (heatLayer) { e.target.checked ? heatLayer.addTo(map) : map.removeLayer(heatLayer); }
+    });
+
+    loadHotspots();
+</script>
+{% endblock %}
